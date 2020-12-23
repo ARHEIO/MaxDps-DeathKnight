@@ -1,44 +1,261 @@
 local _, addonTable = ...;
 
 --- @type MaxDps
-if not MaxDps then return end
+if not MaxDps then
+	return
+end
 
 local DeathKnight = addonTable.DeathKnight;
 local MaxDps = MaxDps;
+local frameData = MaxDps.FrameData;
 local UnitPower = UnitPower;
 local UnitPowerMax = UnitPowerMax;
 local RunicPower = Enum.PowerType.RunicPower;
 
-local FR = {
-	RemorselessWinter  = 196770,
-	DeathAndDecay	   = 43265,
-	SacrificialPact    = 327574,
-	RaiseDead          = 46585,
-	GatheringStorm     = 194912,
-	HowlingBlast       = 49184,
-	Rime               = 59052,
-	FrostFever         = 55095,
-	Obliterate         = 49020,
-	KillingMachine     = 51128,
-	EmpowerRuneWeapon  = 47568,
-	HornOfWinter       = 57330,
-	ChainsOfIce        = 45524,
-	PillarOfFrost      = 51271,
-	FrostStrike        = 49143,
-	BreathOfSindragosa = 152279,
-	Frostscythe        = 207230,
-	FrostwyrmsFury     = 279302,
-	MasteryFrozenHeart = 77514,
-	Obliteration       = 281238,
-	ColdHeart          = 281209,
-	ColdHeartTalent    = 281208,
-	IcyTalons          = 194879,
-	IcyTalonsTalent    = 22017,
-	FrozenPulse        = 22523,
-	GlacialAdvance     = 194913
-};
+local FSCost = 25;
+
+-- Actions
+local _RemorselessWinter  = 196770;
+local _DeathAndDecay	  = 0000000000000;
+local _SacrificialPact    = 327574;
+local _RaiseDead          = 46585;
+local _HowlingBlast       = 49184;
+local _Obliterate         = 49020;
+local _EmpowerRuneWeapon  = 47568;
+local _HornOfWinter       = 0000000000000;
+local _ChainsOfIce        = 45524;
+local _PillarOfFrost      = 51271;
+local _FrostStrike        = 49143;
+local _BreathOfSindragosa = 152279;
+local _Frostscythe        = 0000000000000;
+local _FrostwyrmsFury     = 279302;
+local _GlacialAdvance     = 0000000000000;
+local _MasteryFrozenHeart = 77514;
+
+-- Covenant
+local _DeathsDue          = 324128;
+
+-- Passives
+local _IcyTalonsTalent      = 194878;
+local _ColdHeartTalent      = 281208;
+local _GatheringStormTalent = 194912;
+local _FrozenPulse          = 194909;
+local _ObliterationTalent   = 281238;
+
+-- Buffs
+local _Rime               = 59052;
+local _KillingMachine     = 51124;
+local _IcyTalons          = 0000000000000;
+local _ColdHeart          = 281209;
+
+-- Debuffs
+local _FrostFever         = 55095;
+local _Razorice           = 51714;
+
+-- Core function
+-- function MaxDps:PrepareFrameData()
+-- 	if not self.FrameData then
+-- 		self.FrameData = {
+-- 			cooldown  = self.PlayerCooldowns,
+-- 			activeDot = self.ActiveDots
+-- 		};
+-- 	end
+
+-- 	self.FrameData.timeShift, self.FrameData.currentSpell, self.FrameData.gcdRemains = MaxDps:EndCast();
+-- 	self.FrameData.gcd = self:GlobalCooldown();
+-- 	self.FrameData.buff, self.FrameData.debuff = MaxDps:CollectAuras();
+-- 	self.FrameData.talents = self.PlayerTalents;
+-- 	self.FrameData.azerite = self.AzeriteTraits;
+-- 	self.FrameData.essences = self.AzeriteEssences;
+-- 	self.FrameData.covenant = self.CovenantInfo;
+-- 	self.FrameData.spellHistory = self.spellHistory;
+-- 	self.FrameData.timeToDie = self:GetTimeToDie();
+-- end
+
+function HasTalent(name)
+	local frameData = MaxDps.FrameData;
+	return frameData.talents[name] == 1;
+end
+
+-- Buff / Debuff Interface:
+-- output[id] = {
+-- 	name           = name,
+-- 	up             = remains > 0,
+-- 	upMath		   = remains > 0 and 1 or 0,
+-- 	count          = count, -- number of stacks
+-- 	expirationTime = expirationTime,
+-- 	remains        = remains,
+-- 	duration       = duration,
+-- 	refreshable    = remains < 0.3 * duration,
+-- };
+function PlayerBuff(name)
+	local frameData = MaxDps.FrameData;
+	local buff = frameData.buff[name];
+	return buff
+end
+
+function TargetHasDebuff(name)
+	local frameData = MaxDps.FrameData;
+	local debuff = frameData.debuff[name];
+	return debuff.up, debuff.remains;
+end
+
+-- return {
+-- 	duration        = GetSpellBaseCooldown(spellId) / 1000,
+-- 	ready           = remains <= 0,
+-- 	remains         = remains,
+-- 	fullRecharge    = fullRecharge,
+-- 	partialRecharge = partialRecharge,
+-- 	charges         = charges,
+-- 	maxCharges      = maxCharges
+-- };
+function SpellAvailable(name)
+	local frameData = MaxDps.FrameData;
+	local cd = frameData.cooldown[name];
+	return cd.ready, cd.remains;
+end
+
+function canCastSpell(name)
+	local ready, cd = SpellAvailable(name)
+	return ready;
+end
+
+function spellCooldown(name)
+	local ready, cd = SpellAvailable(name)
+	return cd;
+end
+
+function DeathKnight:FrostAoe()
+	local runic = UnitPower('player', RunicPower);
+	local frameData = MaxDps.FrameData;
+	local runes, runeCd = DeathKnight:Runes(frameData.timeShift);
+	local runic = UnitPower('player', RunicPower);
+	
+	local remorselessWinterReady, remorselessWinterCD = SpellAvailable(_RemorselessWinter);
+
+	-- actions.aoe=remorseless_winter
+	if remorselessWinterReady then return _RemorselessWinter end
+
+	-- actions.aoe+=/glacial_advance,if=talent.frostscythe
+	if HasTalent(_Frostscythe) and HasTalent(_GlacialAdvance) then
+		if canCastSpell(_GlacialAdvance) then return _GlacialAdvance end
+	end
+
+	-- actions.aoe+=/frost_strike,target_if=RAZORICE_CALC,if=cooldown.remorseless_winter.remains<=2*gcd&talent.gathering_storm
+	if HasTalent(_GatheringStorm) and remorselessWinterCD <= 2 * frameData.gcd then
+		if runic >= FSCost then return _FrostStrike end
+	end
+
+	-- actions.aoe+=/howling_blast,if=buff.rime.up
+	if PlayerBuff(_Rime).up then
+		if runes >= 1 then return _HowlingBlast end
+	end
+
+	-- actions.aoe+=/frostscythe,if=buff.killing_machine.react&(!death_and_decay.ticking&covenant.night_fae|!covenant.night_fae)
+	-- actions.aoe+=/glacial_advance,if=runic_power.deficit<(15+talent.runic_attenuation*3)
+	if runic > 82 then
+		if HasTalent(_GlacialAdvance) and canCastSpell(_GlacialAdvance) then return _GlacialAdvance end
+	end
+
+	-- actions.aoe+=/frost_strike,target_if=RAZORICE_CALC,if=runic_power.deficit<(15+talent.runic_attenuation*3)
+	if runic > 82 then return _FrostStrike end
+
+	-- actions.aoe+=/remorseless_winter
+	if remorselessWinterReady and runes >= 1 then return _RemorselessWinter end
+
+	-- actions.aoe+=/frostscythe,if=!death_and_decay.ticking&covenant.night_fae|!covenant.night_fae
+	-- actions.aoe+=/obliterate,target_if=RAZORICE_CALC,if=runic_power.deficit>(25+talent.runic_attenuation*3)
+	if runic < 72 and runes >= 2 then return _Obliterate end
+	
+	-- actions.aoe+=/glacial_advance
+	if HasTalent(_GlacialAdvance) and canCastSpell(_GlacialAdvance) then return _GlacialAdvance end
+	
+	-- actions.aoe+=/frost_strike,target_if=RAZORICE_CALC
+	if runic >= FSCost then return _FrostStrike end
+
+	return nil;
+end
+
+function DeathKnight:FrostSingleTarget()
+	local frameData = MaxDps.FrameData;
+	local runic = UnitPower('player', RunicPower);
+	local runes, runeCd = DeathKnight:Runes(frameData.timeShift);
+	local runic = UnitPower('player', RunicPower);
+
+	-- actions.standard=remorseless_winter,if=talent.gathering_storm|conduit.everfrost|runeforge.biting_cold
+	-- actions.standard+=/glacial_advance,if=!death_knight.runeforge.razorice&(debuff.razorice.stack<5|debuff.razorice.remains<7)
+	-- actions.standard+=/frost_strike,if=cooldown.remorseless_winter.remains<=2*gcd&talent.gathering_storm
+	-- actions.standard+=/frost_strike,if=conduit.eradicating_blow&buff.eradicating_blow.stack=2|conduit.unleashed_frenzy&buff.unleashed_frenzy.remains<3&buff.unleashed_frenzy.up
+	-- actions.standard+=/howling_blast,if=buff.rime.up
+	-- actions.standard+=/obliterate,if=!buff.frozen_pulse.up&talent.frozen_pulse
+	-- actions.standard+=/frost_strike,if=runic_power.deficit<(15+talent.runic_attenuation*3)
+	-- actions.standard+=/obliterate,if=runic_power.deficit>(25+talent.runic_attenuation*3)
+	-- actions.standard+=/frost_strike
+	-- actions.standard+=/horn_of_winter
+	-- actions.standard+=/arcane_torrent
+
+	-- if HasTalent(_GatheringStorm) then
+		if runes >= 1 and canCastSpell(_RemorselessWinter) then return _RemorselessWinter end
+	-- end
+
+	if HasTalent(_IcyTalonsTalent) and PlayerBuff(_IcyTalons).remains < 2 and runic >= 25 then
+		return _FrostStrike
+	end
+
+	if PlayerBuff(_Rime).up then
+		if runes >= 1 then return _HowlingBlast end
+	end
+
+	if HasTalent(_FrozenPulse) and runes >= 2 then return _Obliterate end
+
+	if runic >= 73 then return _FrostStrike end
+
+	if PlayerBuff(_KillingMachine).up and runes >= 4 then
+		return _Obliterate
+	end
+
+	if runes >= 2 then return _Obliterate end
+
+	if runic >= 25 then return _FrostStrike end
+end
+
+function DeathKnight:FrostBosTicking()
+	local targets = MaxDps:SmartAoe();
+	local fd = MaxDps.FrameData;
+	local timeShift = fd.timeShift;
+
+	local runes, runeCd = DeathKnight:Runes(timeShift);
+	local runic = UnitPower('player', RunicPower);
+
+	local cooldown, buff, debuff, timeShift, talents, azerite, currentSpell =
+	fd.cooldown, fd.buff, fd.debuff, fd.timeShift, fd.talents, fd.azerite, fd.currentSpell;
+
+	if runic < 30 then
+		return _Obliterate
+	end
+
+	if (targets >= 2 or HasTalent(_GatheringStorm)) and canCastSpell(_RemorselessWinter).ready then
+		return _RemorselessWinter
+	end
+
+	if runes >= 1 and (buff[_Rime].up or not fever) then
+		return _HowlingBlast;
+	end
+
+	return _Obliterate
+end
 
 function DeathKnight:Frost()
+	local targets = MaxDps:SmartAoe();
+	local fd = MaxDps.FrameData;
+	local timeShift = fd.timeShift;
+
+	local runes, runeCd = DeathKnight:Runes(timeShift);
+	local runic = UnitPower('player', RunicPower);
+
+	local hasFever, feverRemains = TargetHasDebuff(_FrostFever)
+	local bosReady, bosCd = SpellAvailable(_BreathOfSindragosa);
+
 	local fd = MaxDps.FrameData;
 	local cooldown, buff, debuff, timeShift, talents, azerite, currentSpell =
 	fd.cooldown, fd.buff, fd.debuff, fd.timeShift, fd.talents, fd.azerite, fd.currentSpell;
@@ -48,370 +265,49 @@ function DeathKnight:Frost()
 	local runes, runeCd = DeathKnight:Runes(timeShift);
 	local targets = MaxDps:SmartAoe();
 
-	local fever = debuff[FR.FrostFever].remains > 6;
+	local fever = debuff[_FrostFever].remains > 6;
 	local FSCost = 25;
 
 	fd.targets = targets;
 
 	MaxDps:GlowEssences();
 	--BoS only glows when it is at its most efficient point of being used...above 60 runic power
-	MaxDps:GlowCooldown(FR.BreathOfSindragosa, talents[FR.BreathOfSindragosa] and cooldown[FR.BreathOfSindragosa].ready and runic >= 60 and runes <= 1);
+	MaxDps:GlowCooldown(_BreathOfSindragosa, talents[_BreathOfSindragosa] and cooldown[_BreathOfSindragosa].ready and runic >= 60 and runes <= 1);
 
-	MaxDps:GlowCooldown(FR.FrostwyrmsFury, cooldown[FR.FrostwyrmsFury].ready);
-
-	--Pillar of Frost glows when off cooldown unless Obliteration talent is taken and it glows when you have 2 runes and a runic using ability for efficiency of CD
-	MaxDps:GlowCooldown(FR.PillarOfFrost, cooldown[FR.PillarOfFrost].ready and not talents[FR.Obliteration]);
-	MaxDps:GlowCooldown(FR.PillarOfFrost, talents[FR.Obliteration] and runes >= 2 and (runic >= 25 or buff[FR.Rime].up));
-	MaxDps:GlowCooldown(FR.EmpowerRuneWeapon, cooldown[FR.EmpowerRuneWeapon].ready and runes <= 1 and runic <= (runicMax - FSCost));
-
+	-- MaxDps:GlowCooldown(_FrostwyrmsFury, cooldown[_FrostwyrmsFury].ready);
+	MaxDps:GlowCooldown(_PillarOfFrost, canCastSpell(_PillarOfFrost));
+	MaxDps:GlowCooldown(_RaiseDead, canCastSpell(_RaiseDead));
+	MaxDps:GlowCooldown(_SacrificialPact, spellCooldown(_RaiseDead) > 60 and spellCooldown(_RaiseDead) < 50);
 
 	-- Basic On CD Abilities to cast throughout all talent specs
-
-	if cooldown[FR.RaiseDead].ready then
-		return FR.RaiseDead
+	if not hasFever and bosCd > 15 then
+		if runes >= 1 then return _HowlingBlast end
 	end
 
-	--if targets >= 6 and cooldown[FR.SacrificialPact].ready and not cooldown[FR.RaiseDead] then
-	--	return FR.SacrificialPact
-	--end
-
-	if (targets >= 2 or (talents[FR.GatheringStorm])) and cooldown[FR.RemorselessWinter].ready then
-		return FR.RemorselessWinter
+	if canCastSpell(_DeathsDue) and targets > 1 then
+		if runes >= 1 then return _DeathsDue end
 	end
 
-	if talents[FR.ColdHeartTalent] and buff[FR.ColdHeart].count >= 20 and runes >= 1 and not buff[FR.BreathOfSindragosa].up then
-		return FR.ChainsOfIce;
+	if (targets >= 2 or HasTalent(_GatheringStorm)) and canCastSpell(_RemorselessWinter) then
+		return _RemorselessWinter
 	end
 
-	-- If Breath of Sindragosa is chosen
-	if talents[FR.BreathOfSindragosa] then
-		-- If Breath of Sindragosa is up
-		if buff[FR.BreathOfSindragosa].up then
-			--Single Target
-			if targets < 2 then
+	if HasTalent(_ColdHeartTalent) and PlayerBuff(_ColdHeart).count > 10 and PlayerBuff(_PillarOfFrost).up and PlayerBuff(_PillarOfFrost).remains < 4 then
+		return _ChainsOfIce;
+	end
 
-				if runic < 30 then
-					return FR.Obliterate
-				end
+	if HasTalent(_ColdHeartTalent) and spellCooldown(_PillarOfFrost) > 20 and spellCooldown(_PillarOfFrost) > 30 then
+		MaxDps:GlowCooldown(_ChainsOfIce);
+	end
 
-				if (targets >= 2 or (talents[FR.GatheringStorm])) and cooldown[FR.RemorselessWinter].ready then
-					return FR.RemorselessWinter
-				end
+	-- Prevent Cold Heart overcapping during pillar
+	-- actions.cold_heart+=/chains_of_ice,if=talent.obliteration&!buff.pillar_of_frost.up&(buff.cold_heart.stack>=16&buff.unholy_strength.up|buff.cold_heart.stack>=19|cooldown.pillar_of_frost.remains<3&buff.cold_heart.stack>=14
 
-				if runes >= 1 and (buff[FR.Rime].up or not fever) then
-					return FR.HowlingBlast;
-				end
-
-				if runes >= 5 or runic < 45 then
-					return FR.Obliterate
-				end
-
-				if cooldown[FR.RemorselessWinter].ready then
-					return FR.RemorselessWinter
-				end
-
-				if runic < 73 then
-					return FR.Obliterate
-				end
-
-				--AoE / Cleave
-			else
-
-				if runic < 30 then
-					return FR.Frostscythe
-				end
-
-				if (targets >= 2 or (talents[FR.GatheringStorm])) and cooldown[FR.RemorselessWinter].ready then
-					return FR.RemorselessWinter
-				end
-
-				if runes >= 1 and (buff[FR.Rime].up or not fever) then
-					return FR.HowlingBlast;
-				end
-
-				if runes >= 5 or runic < 45 then
-					return FR.Frostscythe
-				end
-
-				if cooldown[FR.RemorselessWinter].ready then
-					return FR.RemorselessWinter
-				end
-
-				if runic < 73 then
-					return FR.Frostscythe
-				end
-			end
-			return nil
-
-			-- If Breath of Sindragosa is not active
-		else
-			--Single Target
-			if targets < 2 then
-
-
-				if talents[FR.IcyTalonsTalent] and buff[FR.IcyTalons].remains < 2 and runic >= 25 then
-					return FR.FrostStrike
-				end
-
-				if runes >= 1 and (buff[FR.Rime].up or not fever) then
-					return FR.HowlingBlast;
-				end
-
-				if talents[FR.FrozenPulse] and runes >= 2 then
-					return FR.Obliterate
-				end
-
-				if runic >= 73 then
-					return FR.FrostStrike
-				end
-
-				if talents[FR.Frostscythe] and buff[FR.KillingMachine].up and runes >= 1 then
-					return FR.Frostscythe
-				elseif buff[FR.KillingMachine] and runes >= 4 then
-					return FR.Obliterate
-				end
-
-				if runes >= 2 then
-					return FR.Obliterate
-				end
-
-				if runic >= 25 then
-					return FR.FrostStrike
-				end
-
-				--AoE / Cleave
-			else
-				if talents[FR.IcyTalonsTalent] and buff[FR.IcyTalons].remains < 2 then
-					if talents[FR.GlacialAdvance] and cooldown[FR.GlacialAdvance].ready and runic > 30 then
-						return FR.GlacialAdvance
-					elseif runic >= 25 then
-						return FR.FrostStrike
-					end
-
-				end
-
-				if runes >= 1 and (buff[FR.Rime].up or not fever) then
-					return FR.HowlingBlast;
-				end
-
-				if talents[FR.Frostscythe] and buff[FR.KillingMachine].up then
-					return FR.Frostscythe
-				end
-
-				if cooldown[FR.DeathAndDecay].ready and runes >= 1 then
-					return FR.DeathAndDecay
-				end
-
-				if talents[FR.Frostscythe] and runic < 73 then
-					return FR.Frostscythe
-				end
-
-				if runes >= 2 and runic < 73 then
-					return FR.Obliterate
-				end
-
-				if talents[FR.GlacialAdvance] and cooldown[FR.GlacialAdvance].ready and runic >= 90 then
-					return FR.GlacialAdvance
-				end
-
-				if runic >= 73 then
-					return FR.FrostStrike
-				end
-			end
-
-
-			return nil
-
-		end
-
-		-- If Obliteration is chosen
-	elseif talents[FR.Obliteration] then
-		--If Pillar of Frost CD is up
-		if buff[FR.PillarOfFrost].up then
-			if talents[FR.GatheringStorm] and cooldown[FR.RemorselessWinter].ready then
-				return FR.RemorselessWinter
-			end
-
-			if targets >= 2 and cooldown[FR.DeathAndDecay].ready then
-				return FR.DeathAndDecay
-			end
-
-			if buff[FR.KillingMachine].up then
-				if runes >= 2 and targets < 2 then
-					return FR.Obliterate
-				elseif targets >= 2 and talents[FR.Frostscythe] and runes >= 1 then
-					return FR.Frostscythe
-				elseif runes >=2 then
-					return FR.Obliterate
-				end
-			end
-
-			if targets >= 2 and talents[FR.GlacialAdvance] and cooldown[FR.GlacialAdvance].ready and runic >= 30 then
-				return FR.GlacialAdvance
-			end
-
-			if not buff[FR.KillingMachine].up or runic >= 73 then
-				return FR.FrostStrike
-			end
-
-			if runes >= 1 and (buff[FR.Rime].up) then
-				return FR.HowlingBlast
-			end
-
-
-
-			if runes >= 2 then
-				return FR.Obliterate
-			end
-
-			--If Pillar of Frost CD is down
-		else
-			-- Single Target
-			if targets < 2 then
-				if talents[FR.IcyTalonsTalent] and buff[FR.IcyTalons].remains < 2 and runic >= 25 then
-					return FR.FrostStrike
-				end
-
-				if runes >= 1 and (buff[FR.Rime].up or not fever) then
-					return FR.HowlingBlast;
-				end
-
-				if talents[FR.FrozenPulse] and runes >= 2 then
-					return FR.Obliterate
-				end
-
-				if runic >= 73 then
-					return FR.FrostStrike
-				end
-
-				if talents[FR.Frostscythe] and buff[FR.KillingMachine].up and runes >= 1 then
-					return FR.Frostscythe
-				elseif buff[FR.KillingMachine] and runes >= 4 then
-					return FR.Obliterate
-				end
-
-				if runes >= 2 then
-					return FR.Obliterate
-				end
-
-				if runic >= 25 then
-					return FR.FrostStrike
-				end
-				-- AoE / Cleave
-			else
-				if talents[FR.IcyTalonsTalent] and buff[FR.IcyTalons].remains < 2 then
-					if talents[FR.GlacialAdvance] and runic > 30 then
-						return FR.GlacialAdvance
-					elseif runic >= 25 then
-						return FR.FrostStrike
-					end
-
-				end
-
-				if runes >= 1 and (buff[FR.Rime].up or not fever) then
-					return FR.HowlingBlast;
-				end
-
-				if talents[FR.Frostscythe] and buff[FR.KillingMachine].up then
-					return FR.Frostscythe
-				end
-
-				if cooldown[FR.DeathAndDecay].ready and runes >= 1 then
-					return FR.DeathAndDecay
-				end
-
-				if talents[FR.Frostscythe] and runic < 73 then
-					return FR.Frostscythe
-				end
-
-				if runes >= 2 and runic < 73 then
-					return FR.Obliterate
-				end
-
-				if talents[FR.GlacialAdvance] and runic >= 90 then
-					return FR.GlacialAdvance
-				end
-
-				if runic >= 73 then
-					return FR.FrostStrike
-				end
-			end
-		end
-		return nil
-		-- If Ice Cap or no level 50 talent is chosen
+	if (PlayerBuff(_BreathOfSindragosa).up) then
+		return DeathKnight:FrostBosTicking()
+	elseif targets < 2 then
+		return DeathKnight:FrostSingleTarget()
 	else
-		--Single Target
-		if targets < 2 then
-			if targets < 2 then
-				if talents[FR.IcyTalonsTalent] and buff[FR.IcyTalons].remains < 2 and runic >= 25 then
-					return FR.FrostStrike
-				end
-
-				if runes >= 1 and (buff[FR.Rime].up or not fever) then
-					return FR.HowlingBlast;
-				end
-
-				if talents[FR.FrozenPulse] and runes >= 2 then
-					return FR.Obliterate
-				end
-
-				if runic >= 73 then
-					return FR.FrostStrike
-				end
-
-				if talents[FR.Frostscythe] and buff[FR.KillingMachine].up and runes >= 1 then
-					return FR.Frostscythe
-				elseif buff[FR.KillingMachine] and runes >= 4 then
-					return FR.Obliterate
-				end
-
-				if runes >= 2 then
-					return FR.Obliterate
-				end
-
-				if runic >= 25 then
-					return FR.FrostStrike
-				end
-				--AoE Cleave
-			else
-				if talents[FR.IcyTalonsTalent] and buff[FR.IcyTalons].remains < 2 then
-					if talents[FR.GlacialAdvance] and runic > 30 then
-						return FR.GlacialAdvance
-					elseif runic >= 25 then
-						return FR.FrostStrike
-					end
-
-				end
-
-				if runes >= 1 and (buff[FR.Rime].up or not fever) then
-					return FR.HowlingBlast;
-				end
-
-				if talents[FR.Frostscythe] and buff[FR.KillingMachine].up then
-					return FR.Frostscythe
-				end
-
-				if cooldown[FR.DeathAndDecay].ready and runes >= 1 then
-					return FR.DeathAndDecay
-				end
-
-				if talents[FR.Frostscythe] and runic < 73 then
-					return FR.Frostscythe
-				end
-
-				if runes >= 2 and runic < 73 then
-					return FR.Obliterate
-				end
-
-				if talents[FR.GlacialAdvance] and runic >= 90 then
-					return FR.GlacialAdvance
-				end
-
-				if runic >= 73 then
-					return FR.FrostStrike
-				end
-			end
-			return nil
-		end
+		return DeathKnight:FrostAoe()
 	end
 end
